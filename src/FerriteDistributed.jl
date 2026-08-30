@@ -36,4 +36,6 @@ include("VTK.jl")
 
 include("exports.jl")
 
+include("FDForestBWG.jl")
+
 end

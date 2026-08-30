@@ -8,19 +8,19 @@ how vertices, edges and faces are connectedted between processes.
 !!! todo
     PartitionedArrays.jl ready constructor via extension
 """
-mutable struct NODGrid{dim,C<:AbstractCell,T<:Real} <: AbstractNODGrid{dim}
+mutable struct NODGrid{dim, C <: AbstractCell, T <: Real} <: AbstractNODGrid{dim}
     # Dense comminicator on the grid
     grid_comm::MPI.Comm
     # Sparse communicator along the shared vertex neighbors
     # We only need this one because the vertices induce the edge and face neighbors.
     interface_comm::MPI.Comm
     # Here we store the full local grid
-    local_grid::Grid{dim,C,T}
+    local_grid::Grid{dim, C, T}
     # Local copies of the shared entities of the form (local index, (process id in grid_comm, remote index))
-    # The entities consistently contain their *Index, because faces and edges are not materialized. 
-    shared_vertices::Dict{VertexIndex,SharedVertex}
-    shared_edges::Dict{EdgeIndex,SharedEdge}
-    shared_faces::Dict{FaceIndex,SharedFace}
+    # The entities consistently contain their *Index, because faces and edges are not materialized.
+    shared_vertices::Dict{VertexIndex, SharedVertex}
+    shared_edges::Dict{EdgeIndex, SharedEdge}
+    shared_faces::Dict{FaceIndex, SharedFace}
 end
 
 """
@@ -43,14 +43,14 @@ returned by @global_comm .
 
 Get the rank on the global communicator of the distributed grid.
 """
-@inline global_rank(dgrid::NODGrid) =  MPI.Comm_rank(global_comm(dgrid))+1
+@inline global_rank(dgrid::NODGrid) = MPI.Comm_rank(global_comm(dgrid)) + 1
 
 """
     global_nranks(::NODGrid)
 
 Get the number of ranks on the global communicator of the distributed grid.
 """
-@inline global_nranks(dgrid::NODGrid) =  MPI.Comm_size(global_comm(dgrid))
+@inline global_nranks(dgrid::NODGrid) = MPI.Comm_size(global_comm(dgrid))
 
 """
     NODGrid(grid_comm::MPI.Comm, grid_to_distribute::Grid{dim,C,T})
@@ -58,11 +58,11 @@ Get the number of ranks on the global communicator of the distributed grid.
 Construct a non-overlapping distributed grid from a grid with the SFC induced by the element ordering on a specified MPI communicator.
 It is assumed that this function is called with exactly the same grid on each MPI process in the communicator.
 """
-function NODGrid(grid_comm::MPI.Comm, grid_to_distribute::Grid{dim,C,T}, alg = PartitioningAlgorithm.SFC()) where {dim,C,T}
+function NODGrid(grid_comm::MPI.Comm, grid_to_distribute::Grid{dim, C, T}, alg = PartitioningAlgorithm.SFC()) where {dim, C, T}
     grid_topology = CoverTopology(grid_to_distribute)
     nparts = MPI.Comm_size(grid_comm)
     partitioning = create_partitioning(grid_to_distribute, grid_topology, nparts, alg)
-    NODGrid(grid_comm, grid_to_distribute, grid_topology, partitioning)
+    return NODGrid(grid_comm, grid_to_distribute, grid_topology, partitioning)
 end
 
 """
@@ -70,26 +70,26 @@ end
 
 Construct a non-overlapping distributed grid from a grid with given topology and partitioning on a specified MPI communicator.
 
-"""    
-function NODGrid(grid_comm::MPI.Comm, grid_to_distribute::Grid{dim,C,T}, grid_topology::CoverTopology, partitioning::Vector{<:Integer}) where {dim,C,T}
+"""
+function NODGrid(grid_comm::MPI.Comm, grid_to_distribute::Grid{dim, C, T}, grid_topology::CoverTopology, partitioning::Vector{<:Integer}) where {dim, C, T}
     n_cells_global = getncells(grid_to_distribute)
     @assert n_cells_global > 0 "Please provide a non-empty input mesh."
 
-    partmin,partmax = extrema(partitioning)
+    partmin, partmax = extrema(partitioning)
     @assert partmin > 0
     @assert partmax <= MPI.Comm_size(grid_comm)
 
-    my_rank = MPI.Comm_rank(grid_comm)+1
+    my_rank = MPI.Comm_rank(grid_comm) + 1
 
     # Start extraction of local grid
     # 1. Extract local cells
-    local_cells = getcells(grid_to_distribute)[[i for i ∈ 1:n_cells_global if partitioning[i] == my_rank]]
+    local_cells = getcells(grid_to_distribute)[[i for i in 1:n_cells_global if partitioning[i] == my_rank]]
     @assert length(local_cells) > 0 # Cannot handle empty partitions yet
 
     # 2. Find unique nodes
     local_node_index_set = OrderedSet{Int}()
-    for cell ∈ local_cells
-        for global_node_idx ∈ cell.nodes # @TODO abstraction
+    for cell in local_cells
+        for global_node_idx in cell.nodes # @TODO abstraction
             push!(local_node_index_set, global_node_idx)
         end
     end
@@ -97,34 +97,34 @@ function NODGrid(grid_comm::MPI.Comm, grid_to_distribute::Grid{dim,C,T}, grid_to
     # 3. Build a map for global to local node indices. Local node ids are assigned in
     # ascending global id order, so that node id comparisons (and hence entity
     # orientations, e.g. of edge dofs) agree between all processes.
-    global_to_local_node_map = Dict{Int,Int}()
-    for (local_node_idx, global_node_idx) ∈ enumerate(sort!(collect(local_node_index_set)))
+    global_to_local_node_map = Dict{Int, Int}()
+    for (local_node_idx, global_node_idx) in enumerate(sort!(collect(local_node_index_set)))
         global_to_local_node_map[global_node_idx] = local_node_idx
     end
 
     # 4. Extract local nodes
-    local_nodes = Vector{Node{dim,T}}(undef,length(local_node_index_set))
+    local_nodes = Vector{Node{dim, T}}(undef, length(local_node_index_set))
     begin
         global_nodes = getnodes(grid_to_distribute)
-        for global_node_idx ∈ local_node_index_set
+        for global_node_idx in local_node_index_set
             local_node_idx = global_to_local_node_map[global_node_idx]
             local_nodes[local_node_idx] = global_nodes[global_node_idx]
         end
     end
 
     # 5. Transform cell indices
-    for local_cell_idx ∈ 1:length(local_cells)
+    for local_cell_idx in 1:length(local_cells)
         local_cells[local_cell_idx] = C(map(global_node_idx -> global_to_local_node_map[global_node_idx], local_cells[local_cell_idx].nodes))
     end
 
     # 6. Extract sets
     # @TODO deduplicate the code. We should be able to merge each of these into a macro or function.
     # We build this map now, so we avoid the communication later.
-    global_to_local_cell_map = Dict{Int,Dict{Int,Int}}()
-    for rank ∈ 1:MPI.Comm_size(grid_comm)
-        global_to_local_cell_map[rank] = Dict{Int,Int}()
+    global_to_local_cell_map = Dict{Int, Dict{Int, Int}}()
+    for rank in 1:MPI.Comm_size(grid_comm)
+        global_to_local_cell_map[rank] = Dict{Int, Int}()
         next_local_cell_idx = 1
-        for global_cell_idx ∈ 1:n_cells_global
+        for global_cell_idx in 1:n_cells_global
             if partitioning[global_cell_idx] == rank
                 global_to_local_cell_map[rank][global_cell_idx] = next_local_cell_idx
                 next_local_cell_idx += 1
@@ -132,34 +132,34 @@ function NODGrid(grid_comm::MPI.Comm, grid_to_distribute::Grid{dim,C,T}, grid_to
         end
     end
 
-    cellsets = Dict{String,OrderedSet{Int}}()
-    for key ∈ keys(grid_to_distribute.cellsets)
+    cellsets = Dict{String, OrderedSet{Int}}()
+    for key in keys(grid_to_distribute.cellsets)
         cellsets[key] = OrderedSet{Int}() # create empty set, so it does not crash during assembly
-        for global_cell_idx ∈ grid_to_distribute.cellsets[key]
+        for global_cell_idx in grid_to_distribute.cellsets[key]
             if haskey(global_to_local_cell_map[my_rank], global_cell_idx)
                 push!(cellsets[key], global_to_local_cell_map[my_rank][global_cell_idx])
             end
         end
     end
 
-    nodesets = Dict{String,OrderedSet{Int}}()
-    for key ∈ keys(grid_to_distribute.nodesets)
+    nodesets = Dict{String, OrderedSet{Int}}()
+    for key in keys(grid_to_distribute.nodesets)
         nodesets[key] = OrderedSet{Int}() # create empty set, so it does not crash during assembly
-        for global_node_idx ∈ grid_to_distribute.nodesets[key]
+        for global_node_idx in grid_to_distribute.nodesets[key]
             if haskey(global_to_local_node_map, global_node_idx)
                 push!(nodesets[key], global_to_local_node_map[global_node_idx])
             end
         end
     end
 
-    facesets = Dict{String,OrderedSet{FaceIndex}}()
+    facesets = Dict{String, OrderedSet{FaceIndex}}()
 
-    edgesets = Dict{String,OrderedSet{EdgeIndex}}()
+    edgesets = Dict{String, OrderedSet{EdgeIndex}}()
 
-    vertexsets = Dict{String,OrderedSet{VertexIndex}}()
-    for key ∈ keys(grid_to_distribute.vertexsets)
+    vertexsets = Dict{String, OrderedSet{VertexIndex}}()
+    for key in keys(grid_to_distribute.vertexsets)
         vertexsets[key] = OrderedSet{VertexIndex}() # create empty set, so it does not crash during assembly
-        for vi ∈ grid_to_distribute.vertexsets[key]
+        for vi in grid_to_distribute.vertexsets[key]
             global_cell_idx = vi[1]
             i = vi[2]
             if haskey(global_to_local_cell_map[my_rank], global_cell_idx)
@@ -169,10 +169,10 @@ function NODGrid(grid_comm::MPI.Comm, grid_to_distribute::Grid{dim,C,T}, grid_to
     end
 
     # Convert sets to facetsets for the new Grid constructor
-    facetsets = Dict{String,OrderedSet{FacetIndex}}()
-    for key ∈ keys(grid_to_distribute.facetsets)
+    facetsets = Dict{String, OrderedSet{FacetIndex}}()
+    for key in keys(grid_to_distribute.facetsets)
         facetsets[key] = OrderedSet{FacetIndex}()
-        for fi ∈ grid_to_distribute.facetsets[key]
+        for fi in grid_to_distribute.facetsets[key]
             global_cell_idx = fi[1]
             i = fi[2]
             if haskey(global_to_local_cell_map[my_rank], global_cell_idx)
@@ -184,28 +184,28 @@ function NODGrid(grid_comm::MPI.Comm, grid_to_distribute::Grid{dim,C,T}, grid_to
     local_grid = Grid(
         local_cells,
         local_nodes,
-        cellsets=cellsets,
-        nodesets=nodesets,
-        facetsets=facetsets,
-        vertexsets=vertexsets
+        cellsets = cellsets,
+        nodesets = nodesets,
+        facetsets = facetsets,
+        vertexsets = vertexsets
     )
 
-    shared_vertices = Dict{VertexIndex,SharedVertex}()
-    shared_edges = Dict{EdgeIndex,SharedEdge}()
-    shared_faces = Dict{FaceIndex,SharedFace}()
-    for (global_cell_idx,global_cell) ∈ enumerate(getcells(grid_to_distribute))
+    shared_vertices = Dict{VertexIndex, SharedVertex}()
+    shared_edges = Dict{EdgeIndex, SharedEdge}()
+    shared_faces = Dict{FaceIndex, SharedFace}()
+    for (global_cell_idx, global_cell) in enumerate(getcells(grid_to_distribute))
         if partitioning[global_cell_idx] == my_rank
             # Vertex
-            for (i, _) ∈ enumerate(Ferrite.vertices(global_cell))
+            for (i, _) in enumerate(Ferrite.vertices(global_cell))
                 cell_vertex = VertexIndex(global_cell_idx, i)
-                remote_vertices = Dict{Int,Vector{VertexIndex}}()
-                for other_vertex ∈ getneighborhood(grid_topology, grid_to_distribute, cell_vertex, true)
+                remote_vertices = Dict{Int, Vector{VertexIndex}}()
+                for other_vertex in getneighborhood(grid_topology, grid_to_distribute, cell_vertex, true)
                     (global_cell_neighbor_idx, j) = other_vertex
                     other_rank = partitioning[global_cell_neighbor_idx]
                     if other_rank != my_rank
-                        if Ferrite.toglobal(grid_to_distribute,cell_vertex) == Ferrite.toglobal(grid_to_distribute,other_vertex)
-                            if !haskey(remote_vertices,other_rank)
-                                remote_vertices[other_rank] = Vector(undef,0)
+                        if Ferrite.toglobal(grid_to_distribute, cell_vertex) == Ferrite.toglobal(grid_to_distribute, other_vertex)
+                            if !haskey(remote_vertices, other_rank)
+                                remote_vertices[other_rank] = Vector(undef, 0)
                             end
                             Ferrite.@debug println("Detected shared vertex $cell_vertex neighbor $other_vertex (R$my_rank)")
                             push!(remote_vertices[other_rank], VertexIndex(global_to_local_cell_map[other_rank][global_cell_neighbor_idx], j))
@@ -221,16 +221,16 @@ function NODGrid(grid_comm::MPI.Comm, grid_to_distribute::Grid{dim,C,T}, grid_to
 
             # Face
             if dim > 1
-                for (i, _) ∈ enumerate(Ferrite.faces(global_cell))
+                for (i, _) in enumerate(Ferrite.faces(global_cell))
                     cell_face = FaceIndex(global_cell_idx, i)
-                    remote_faces = Dict{Int,Vector{FaceIndex}}()
-                    for other_face ∈ getneighborhood(grid_topology, grid_to_distribute, cell_face, true)
+                    remote_faces = Dict{Int, Vector{FaceIndex}}()
+                    for other_face in getneighborhood(grid_topology, grid_to_distribute, cell_face, true)
                         (global_cell_neighbor_idx, j) = other_face
                         other_rank = partitioning[global_cell_neighbor_idx]
                         if other_rank != my_rank
-                            if Ferrite.toglobal(grid_to_distribute,cell_face) == Ferrite.toglobal(grid_to_distribute,other_face)
-                                if !haskey(remote_faces,other_rank)
-                                    remote_faces[other_rank] = Vector(undef,0)
+                            if Ferrite.toglobal(grid_to_distribute, cell_face) == Ferrite.toglobal(grid_to_distribute, other_face)
+                                if !haskey(remote_faces, other_rank)
+                                    remote_faces[other_rank] = Vector(undef, 0)
                                 end
                                 Ferrite.@debug println("Detected shared face $cell_face neighbor $other_face (R$my_rank)")
                                 push!(remote_faces[other_rank], FaceIndex(global_to_local_cell_map[other_rank][global_cell_neighbor_idx], j))
@@ -247,16 +247,16 @@ function NODGrid(grid_comm::MPI.Comm, grid_to_distribute::Grid{dim,C,T}, grid_to
 
             # Edge
             if dim > 1
-                for (i, _) ∈ enumerate(Ferrite.edges(global_cell))
+                for (i, _) in enumerate(Ferrite.edges(global_cell))
                     cell_edge = EdgeIndex(global_cell_idx, i)
-                    remote_edges = Dict{Int,Vector{EdgeIndex}}()
-                    for other_edge ∈ getneighborhood(grid_topology, grid_to_distribute, cell_edge, true)
+                    remote_edges = Dict{Int, Vector{EdgeIndex}}()
+                    for other_edge in getneighborhood(grid_topology, grid_to_distribute, cell_edge, true)
                         (global_cell_neighbor_idx, j) = other_edge
                         other_rank = partitioning[global_cell_neighbor_idx]
                         if other_rank != my_rank
-                            if Ferrite.toglobal(grid_to_distribute,cell_edge) == Ferrite.toglobal(grid_to_distribute,other_edge)
-                                if !haskey(remote_edges,other_rank)
-                                    remote_edges[other_rank] = Vector(undef,0)
+                            if Ferrite.toglobal(grid_to_distribute, cell_edge) == Ferrite.toglobal(grid_to_distribute, other_edge)
+                                if !haskey(remote_edges, other_rank)
+                                    remote_edges[other_rank] = Vector(undef, 0)
                                 end
                                 Ferrite.@debug println("Detected shared edge $cell_edge neighbor $other_edge (R$my_rank)")
                                 push!(remote_edges[other_rank], EdgeIndex(global_to_local_cell_map[other_rank][global_cell_neighbor_idx], j))
@@ -275,32 +275,33 @@ function NODGrid(grid_comm::MPI.Comm, grid_to_distribute::Grid{dim,C,T}, grid_to
 
     # Neighborhood graph
     neighbors_set = OrderedSet{Cint}()
-    for (vi, sv) ∈ shared_vertices
-        for (rank, vvi) ∈ sv.remote_vertices
+    for (vi, sv) in shared_vertices
+        for (rank, vvi) in sv.remote_vertices
             push!(neighbors_set, rank)
         end
     end
     # Adjust ranks back to to C index convention
-    dest = collect(neighbors_set).-1
+    dest = collect(neighbors_set) .- 1
     degree = length(dest)
-    interface_comm = MPI.Dist_graph_create(grid_comm, Cint[my_rank-1], Cint[degree], Cint.(dest))
+    interface_comm = MPI.Dist_graph_create(grid_comm, Cint[my_rank - 1], Cint[degree], Cint.(dest))
 
-    return NODGrid(grid_comm,interface_comm,local_grid,shared_vertices,shared_edges,shared_faces)
+    return NODGrid(grid_comm, interface_comm, local_grid, shared_vertices, shared_edges, shared_faces)
 end
 
 
 # Here we define the entity ownership by the process sharing an entity with lowest rank in the grid communicator.
 function compute_owner(dgrid::AbstractNODGrid, shared_entity::SharedEntity)
-    my_rank = MPI.Comm_rank(global_comm(dgrid))+1 # Shift rank up by 1 to match Julia's indexing convention
-    return minimum([my_rank; [remote_rank for (remote_rank, _) ∈ remote_entities(shared_entity)]])
+    my_rank = MPI.Comm_rank(global_comm(dgrid)) + 1 # Shift rank up by 1 to match Julia's indexing convention
+    return minimum([my_rank; [remote_rank for (remote_rank, _) in remote_entities(shared_entity)]])
 end
 
 """
     generate_nod_grid(comm::MPI.Comm, args...)
 
 Helper to directly generate non-overlapping distributed grids, designed to replace the call to [`generate_grid`](@ref) for use in distributed environments.
+Returns a NODGrid containing the local grid for each calling process in the communicator
 """
-function generate_nod_grid(comm::MPI.Comm, args...; partitioning_alg=PartitioningAlgorithm.SFC())
+function generate_nod_grid(comm::MPI.Comm, args...; partitioning_alg = PartitioningAlgorithm.SFC())
     full_grid = generate_grid(args...)
     return NODGrid(comm, full_grid, partitioning_alg)
 end
