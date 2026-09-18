@@ -11,8 +11,10 @@ export
     vtk_shared_faces,
     vtk_shared_vertices,
     vtk_partitioning,
+    # ----    Forest    ----
     FDForestBWG,
     generate_forest_grid,
+    materialize_forest,
     # ----    Utils    ----
     global_comm,
     global_rank,

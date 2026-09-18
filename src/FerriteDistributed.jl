@@ -29,13 +29,13 @@ include("Communicator.jl")
 
 include("Partitioning.jl")
 
+include("FDForestBWG.jl")
+
 include("NODGrid.jl")
 include("NODDofHandler.jl")
 
 include("VTK.jl")
 
 include("exports.jl")
-
-include("FDForestBWG.jl")
 
 end

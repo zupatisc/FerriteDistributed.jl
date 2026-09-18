@@ -32,8 +32,16 @@ create_partitioning(::Ferrite.AbstractGrid, ::Ferrite.AbstractTopology, nparts::
 
 # TODO better balancing.
 function create_partitioning(grid::Ferrite.AbstractGrid, ::Ferrite.AbstractTopology, nparts::Int, ::PartitioningAlgorithm.SFC)
-    chunk_size = getncells(grid)÷nparts
-    parts = [((i-1) ÷ chunk_size) + 1 for i ∈ 1:getncells(grid)]
-    parts[(end-rem(getncells(grid), nparts)):end] .= nparts # Assign fat tail for now.
+    chunk_size = getncells(grid) ÷ nparts
+    parts = [((i - 1) ÷ chunk_size) + 1 for i in 1:getncells(grid)]
+    parts[(end - rem(getncells(grid), nparts)):end] .= nparts # Assign fat tail for now.
+    return parts
+end
+
+# Naive copy for accepting non-conforming grid
+function create_partitioning(grid::Ferrite.AMR.NonConformingGrid, ::Ferrite.AbstractTopology, nparts::Int, ::PartitioningAlgorithm.SFC)
+    chunk_size = getncells(grid) ÷ nparts
+    parts = [((i - 1) ÷ chunk_size) + 1 for i in 1:getncells(grid)]
+    parts[(end - rem(getncells(grid), nparts)):end] .= nparts # Assign fat tail for now.
     return parts
 end
