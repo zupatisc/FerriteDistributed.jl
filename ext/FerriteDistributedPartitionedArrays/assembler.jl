@@ -1,4 +1,4 @@
-function Ferrite.create_sparsity_pattern(::Type{<:PSparseMatrix}, dh::Ferrite.AbstractDofHandler, ch::Union{ConstraintHandler,Nothing}=nothing; kwargs...)
+function Ferrite.create_sparsity_pattern(::Type{<:PSparseMatrix}, dh::Ferrite.AbstractDofHandler, ch::Union{ConstraintHandler, Nothing} = nothing; kwargs...)
     error("Not implemented.")
 end
 
@@ -89,7 +89,7 @@ struct COOAssembler{T}
         ic = InterfaceCommunicator(dgrid)
 
         # Extract locally owned dofs
-        ltdof_indices = ldof_to_rank.==my_rank
+        ltdof_indices = ldof_to_rank .== my_rank
         ltdof_to_gdof = ldof_to_gdof[ltdof_indices]
 
         Ferrite.@debug println("ltdof_to_gdof $ltdof_to_gdof (R$my_rank)")
@@ -105,7 +105,7 @@ struct COOAssembler{T}
         row_ghost_mask = .!ltdof_indices
         row_ghost_to_global = ldof_to_gdof[row_ghost_mask]
         row_ghost_to_owner = Int32.(ldof_to_rank[row_ghost_mask])
-        row_g2o = Dict{Int,Int32}()
+        row_g2o = Dict{Int, Int32}()
         for (g, o) in zip(ldof_to_gdof, Int32.(ldof_to_rank))
             row_g2o[g] = o
         end
@@ -158,17 +158,17 @@ struct COOAssembler{T}
         for buffer in ghost_recv
             for i in 1:4:length(buffer)
                 push!(ghost_recv_buffer_dofs_piv, buffer[i])
-                push!(ghost_recv_buffer_dofs, buffer[i+1])
-                push!(ghost_recv_buffer_ranks, buffer[i+2])
-                push!(ghost_recv_buffer_fields, buffer[i+3])
+                push!(ghost_recv_buffer_dofs, buffer[i + 1])
+                push!(ghost_recv_buffer_ranks, buffer[i + 2])
+                push!(ghost_recv_buffer_fields, buffer[i + 3])
             end
         end
 
         Ferrite.@debug println("received $ghost_recv_buffer_dofs with owners $ghost_recv_buffer_ranks (R$my_rank)")
 
-        unique_ghosts_dr = sort(unique(first,zip(ghost_recv_buffer_dofs,ghost_recv_buffer_ranks)))
+        unique_ghosts_dr = sort(unique(first, zip(ghost_recv_buffer_dofs, ghost_recv_buffer_ranks)))
         # unzip manually and make sure we do not add duplicate entries to our columns
-        for (dof,rank) ∈ unique_ghosts_dr
+        for (dof, rank) in unique_ghosts_dr
             if rank != my_rank && dof ∉ ldof_to_gdof
                 push!(ghost_dof_to_global, dof)
                 push!(ghost_dof_rank, rank)
@@ -185,7 +185,7 @@ struct COOAssembler{T}
         col_own_to_global = all_local_cols[col_own_mask]
         col_ghost_to_global = all_local_cols[.!col_own_mask]
         col_ghost_to_owner = all_local_col_ranks[.!col_own_mask]
-        col_g2o = Dict{Int,Int32}()
+        col_g2o = Dict{Int, Int32}()
         for (g, o) in zip(all_local_cols, all_local_col_ranks)
             col_g2o[g] = o
         end
@@ -198,7 +198,7 @@ struct COOAssembler{T}
         f = pzeros(rows)
         Ferrite.@debug println("f constructed (R$my_rank)")
 
-        👻remotes = zip(ghost_recv_buffer_dofs_piv, ghost_recv_buffer_dofs, ghost_recv_buffer_ranks,ghost_recv_buffer_fields)
+        👻remotes = zip(ghost_recv_buffer_dofs_piv, ghost_recv_buffer_dofs, ghost_recv_buffer_ranks, ghost_recv_buffer_fields)
         Ferrite.@debug println("👻remotes $👻remotes (R$my_rank)")
 
         perm = _nod_to_oag_perm(dh)
@@ -214,7 +214,7 @@ Ferrite.start_assemble(dh, _::MPIArray) = COOAssembler{Float64}(dh)
 @propagate_inbounds function Ferrite.assemble!(a::COOAssembler{T}, edof::AbstractVector{Int}, Ke::AbstractMatrix{T}) where {T}
     n_dofs = length(edof)
     append!(a.V, Ke)
-    @inbounds for j in 1:n_dofs
+    return @inbounds for j in 1:n_dofs
         append!(a.I, edof)
         for i in 1:n_dofs
             push!(a.J, edof[j])
@@ -222,10 +222,18 @@ Ferrite.start_assemble(dh, _::MPIArray) = COOAssembler{Float64}(dh)
     end
 end
 
+@propagate_inbounds function Ferrite.assemble!(a::COOAssembler{T}, dofs::AbstractVector{Int}, fe::AbstractVector{T}) where {T}
+    @assert length(dofs) == length(fe) # might affect performance
+    mapped_dofs = a.perm[dofs]
+    return map(local_values(a.f)) do f_local
+        Ferrite.assemble!(f_local, mapped_dofs, fe)
+    end
+end
+
 @propagate_inbounds function Ferrite.assemble!(a::COOAssembler{T}, dofs::AbstractVector{Int}, Ke::AbstractMatrix{T}, fe::AbstractVector{T}) where {T}
     Ferrite.assemble!(a, dofs, Ke)
     mapped_dofs = a.perm[dofs]
-    map(local_values(a.f)) do f_local
+    return map(local_values(a.f)) do f_local
         Ferrite.assemble!(f_local, mapped_dofs, fe)
     end
 end
@@ -237,18 +245,18 @@ function Ferrite.end_assemble(assembler::COOAssembler{T}) where {T}
     my_rank = global_rank(dgrid)
 
     # --------------------- Add ghost entries in IJ 👻 --------------------
-    I = map(i->assembler.dh.ldof_to_gdof[i], assembler.I)
-    J = map(j->assembler.dh.ldof_to_gdof[j], assembler.J)
-    V = map(v->v, assembler.V)
+    I = map(i -> assembler.dh.ldof_to_gdof[i], assembler.I)
+    J = map(j -> assembler.dh.ldof_to_gdof[j], assembler.J)
+    V = map(v -> v, assembler.V)
 
     # Fix ghost layer 👻! Note that the locations for remote processes to write their
     # data into are missing up to this point.
     # TODO here still the interaction between fields is missing...
-    for (i, (pivot_dof, global_ghost_dof, ghost_owner_rank, ghost_field_idx)) ∈ enumerate(assembler.👻remotes)
-        for dᵢ ∈ 1:1#assembler.dh.field_dims[ghost_field_idx]
-            for dⱼ ∈ 1:1#assembler.dh.field_dims[ghost_field_idx]
-                push!(I, pivot_dof+dᵢ-1)
-                push!(J, global_ghost_dof+dⱼ-1)
+    for (i, (pivot_dof, global_ghost_dof, ghost_owner_rank, ghost_field_idx)) in enumerate(assembler.👻remotes)
+        for dᵢ in 1:1 #assembler.dh.field_dims[ghost_field_idx]
+            for dⱼ in 1:1 #assembler.dh.field_dims[ghost_field_idx]
+                push!(I, pivot_dof + dᵢ - 1)
+                push!(J, global_ghost_dof + dⱼ - 1)
                 push!(V, 0.0)
             end
         end
@@ -261,7 +269,7 @@ function Ferrite.end_assemble(assembler::COOAssembler{T}) where {T}
         MPIArray(J, comm, (np,)),
         MPIArray(V, comm, (np,)),
         assembler.rows, assembler.cols;
-        split_format=Val(false)
+        split_format = Val(false)
     ) |> fetch
 
     # psparse already assembles K by default (assemble=Val(true))

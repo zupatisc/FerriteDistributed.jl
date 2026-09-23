@@ -13,8 +13,8 @@ size of such a block (including all components).
 """
 struct EntityDofInfo
     vertexdicts::Vector{Vector{Int}}
-    edgedicts::Vector{Dict{NTuple{2,Int},Int}}
-    facedicts::Vector{Dict{NTuple{3,Int},Int}}
+    edgedicts::Vector{Dict{NTuple{2, Int}, Int}}
+    facedicts::Vector{Dict{NTuple{3, Int}, Int}}
     nentitydofs::Matrix{Int} # 3 × nfields
 end
 
@@ -30,12 +30,12 @@ Fields are added with `add!` or via `SubDofHandler`s, exactly as for the serial
 subdomains are fully supported; ownership and global numbering of dofs on the process
 boundary are negotiated per (entity, field) pair.
 """
-mutable struct NODDofHandler{dim,G<:AbstractNODGrid{dim},LDH<:Ferrite.DofHandler{dim}} <: Ferrite.AbstractDofHandler
+mutable struct NODDofHandler{dim, G <: AbstractNODGrid{dim}, LDH <: Ferrite.DofHandler{dim}} <: Ferrite.AbstractDofHandler
     const ldh::LDH
     const grid::G
     const ldof_to_gdof::Vector{Int}
     const ldof_to_rank::Vector{Int32}
-    entity_dofs::Union{EntityDofInfo,Nothing}
+    entity_dofs::Union{EntityDofInfo, Nothing}
     gdof_offset::Int # number of dofs owned by lower ranks
 end
 
@@ -89,13 +89,13 @@ Ferrite.find_field(dh::NODDofHandler, field_name::Symbol) = Ferrite.find_field(g
 Ferrite.getfieldinterpolation(dh::NODDofHandler, field_idx) = Ferrite.getfieldinterpolation(getlocaldofhandler(dh), field_idx)
 Ferrite.dof_range(dh::NODDofHandler, name::Symbol) = Ferrite.dof_range(getlocaldofhandler(dh), name)
 Ferrite.n_components(dh::NODDofHandler, field) = Ferrite.n_components(getlocaldofhandler(dh), field)
-Ferrite.CellCache(dh::NODDofHandler, flags::UpdateFlags=UpdateFlags()) = Ferrite.CellCache(getlocaldofhandler(dh), flags)
-function Ferrite.CellIterator(dh::NODDofHandler, set::Union{Ferrite.IntegerCollection,Nothing}=nothing, flags::UpdateFlags=UpdateFlags())
+Ferrite.CellCache(dh::NODDofHandler, flags::UpdateFlags = UpdateFlags()) = Ferrite.CellCache(getlocaldofhandler(dh), flags)
+function Ferrite.CellIterator(dh::NODDofHandler, set::Union{Ferrite.IntegerCollection, Nothing} = nothing, flags::UpdateFlags = UpdateFlags())
     return Ferrite.CellIterator(getlocaldofhandler(dh), set, flags)
 end
 Ferrite.CellIterator(dh::NODDofHandler, flags::UpdateFlags) = Ferrite.CellIterator(getlocaldofhandler(dh), nothing, flags)
 Ferrite.evaluate_at_grid_nodes(dh::NODDofHandler, u::AbstractVector, fieldname::Symbol) = Ferrite.evaluate_at_grid_nodes(getlocaldofhandler(dh), u, fieldname)
-Ferrite._evaluate_at_grid_nodes(dh::NODDofHandler, u::AbstractVector, fieldname::Symbol, vtk=Val(false)) = Ferrite._evaluate_at_grid_nodes(getlocaldofhandler(dh), u, fieldname, vtk)
+Ferrite._evaluate_at_grid_nodes(dh::NODDofHandler, u::AbstractVector, fieldname::Symbol, vtk = Val(false)) = Ferrite._evaluate_at_grid_nodes(getlocaldofhandler(dh), u, fieldname, vtk)
 
 # TODO problem here is that the reorder has to be synchronized. We also cannot arbitrarily
 # reorder dofs, because some distributed matrix data structures have strict requirements
@@ -109,9 +109,16 @@ function Ferrite.add!(ch::ConstraintHandler{<:NODDofHandler}, dbc::Dirichlet)
     return invoke(Ferrite.add!, Tuple{ConstraintHandler, Dirichlet}, ch, dbc)
 end
 
+# Redispatch into the serial conformity-constraint implementation. It works purely on the
+# local grid/dofs, so we bypass `add!` (whose `ConstraintHandler{<:DofHandler}` signature an
+# NODDofHandler can never satisfy) and call the helper directly.
+function Ferrite.add!(ch::ConstraintHandler{<:NODDofHandler}, cc::Ferrite.ConformityConstraint)
+    return Ferrite.AMR._add_conformity_constraints!(ch, Ferrite.get_grid(ch.dh), cc)
+end
+
 function Base.show(io::IO, mime::MIME"text/plain", dh::NODDofHandler)
     println(io, "NODDofHandler (rank $(global_rank(getglobalgrid(dh))) of $(global_nranks(getglobalgrid(dh)))) wrapping:")
-    show(io, mime, getlocaldofhandler(dh))
+    return show(io, mime, getlocaldofhandler(dh))
 end
 
 """
@@ -151,8 +158,8 @@ end
 
 function _entity_first_dof(ed::EntityDofInfo, kind::Int, key, field_idx::Int)
     kind == VERTEX_KIND && return ed.vertexdicts[field_idx][key::Int]
-    kind == EDGE_KIND && return get(ed.edgedicts[field_idx], key::NTuple{2,Int}, 0)
-    return get(ed.facedicts[field_idx], key::NTuple{3,Int}, 0)
+    kind == EDGE_KIND && return get(ed.edgedicts[field_idx], key::NTuple{2, Int}, 0)
+    return get(ed.facedicts[field_idx], key::NTuple{3, Int}, 0)
 end
 
 function _entity_dofs(dh::NODDofHandler, kind::Int, field_idx::Int, cell::Int, idx::Int)
@@ -245,7 +252,7 @@ function _entity_dof_counts(ldh::Ferrite.DofHandler)
 end
 
 function _uniform_entity_count(v::Vector{Int}, name::Symbol)
-    m = maximum(v; init=0)
+    m = maximum(v; init = 0)
     all(x -> x == 0 || x == m, v) || error("Field :$name has a varying number of dofs per entity; this is not supported for distributed grids.")
     return m
 end
@@ -264,7 +271,7 @@ function _synchronize_field_names(dh::NODDofHandler)
     for l in lengths
         chunk = String(vbuf.data[(offset + 1):(offset + l)])
         offset += l
-        for s in split(chunk, '\n'; keepempty=false)
+        for s in split(chunk, '\n'; keepempty = false)
             sym = Symbol(s)
             sym in names || push!(names, sym)
         end
@@ -275,11 +282,11 @@ end
 # Merge the (cell, idx)-keyed shared entities of the grid by their physical key (the local
 # node ids) and record one remote representative (cell, idx) per remote rank.
 function _merge_shared_entities(kind::Int, shared_entities, grid::Ferrite.AbstractGrid, ::Type{K}) where {K}
-    merged = Dict{K,Dict{Int,NTuple{2,Int}}}()
+    merged = Dict{K, Dict{Int, NTuple{2, Int}}}()
     for se in shared_entities
         (cell, idx) = se.local_idx
         key = _entity_key(grid, kind, cell, idx)::K
-        remotes = get!(Dict{Int,NTuple{2,Int}}, merged, key)
+        remotes = get!(Dict{Int, NTuple{2, Int}}, merged, key)
         for (rank, remote_idxs) in remote_entities(se)
             haskey(remotes, rank) && continue
             ri = first(remote_idxs)
@@ -313,8 +320,8 @@ function _distribute_global_dofs!(dh::NODDofHandler)
 
     shared = (
         _merge_shared_entities(VERTEX_KIND, get_shared_vertices(dgrid), grid, Int),
-        _merge_shared_entities(EDGE_KIND, get_shared_edges(dgrid), grid, NTuple{2,Int}),
-        _merge_shared_entities(FACE_KIND, get_shared_faces(dgrid), grid, NTuple{3,Int}),
+        _merge_shared_entities(EDGE_KIND, get_shared_edges(dgrid), grid, NTuple{2, Int}),
+        _merge_shared_entities(FACE_KIND, get_shared_faces(dgrid), grid, NTuple{3, Int}),
     )
 
     # Round 1: announce to all sharing neighbors which fields have dofs on each shared
@@ -334,9 +341,9 @@ function _distribute_global_dofs!(dh::NODDofHandler)
 
     # presence[kind][(key, cfield)] -> remote ranks with dofs for cfield on the entity
     presence = (
-        Dict{Tuple{Int,Int},Vector{Int}}(),
-        Dict{Tuple{NTuple{2,Int},Int},Vector{Int}}(),
-        Dict{Tuple{NTuple{3,Int},Int},Vector{Int}}(),
+        Dict{Tuple{Int, Int}, Vector{Int}}(),
+        Dict{Tuple{NTuple{2, Int}, Int}, Vector{Int}}(),
+        Dict{Tuple{NTuple{3, Int}, Int}, Vector{Int}}(),
     )
     for (si, buf) in enumerate(presence_recv)
         rank = ic.sources[si]
@@ -346,10 +353,10 @@ function _distribute_global_dofs!(dh::NODDofHandler)
                 key = _entity_key(grid, kind, cell, idx)::Int
                 push!(get!(Vector{Int}, presence[VERTEX_KIND], (key, cfield)), rank)
             elseif kind == EDGE_KIND
-                key = _entity_key(grid, kind, cell, idx)::NTuple{2,Int}
+                key = _entity_key(grid, kind, cell, idx)::NTuple{2, Int}
                 push!(get!(Vector{Int}, presence[EDGE_KIND], (key, cfield)), rank)
             else
-                key = _entity_key(grid, kind, cell, idx)::NTuple{3,Int}
+                key = _entity_key(grid, kind, cell, idx)::NTuple{3, Int}
                 push!(get!(Vector{Int}, presence[FACE_KIND], (key, cfield)), rank)
             end
         end
@@ -358,7 +365,7 @@ function _distribute_global_dofs!(dh::NODDofHandler)
     # The owner of an (entity, field) dof block is the lowest rank with dofs for the field
     # on the entity. Note that this can differ between fields on the same entity when
     # fields are restricted to subdomains.
-    _block_owner(kind, key, cfield) = minimum(get(presence[kind], (key, cfield), Int[]); init=my_rank)
+    _block_owner(kind, key, cfield) = minimum(get(presence[kind], (key, cfield), Int[]); init = my_rank)
 
     for kind in 1:3, (key, _) in shared[kind]
         for field_idx in 1:nfields

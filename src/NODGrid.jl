@@ -64,7 +64,7 @@ function NODGrid(dforest::FDForestBWG)
     grid_comm = dforest.forest_comm
     alg = dforest.part_algo
 
-    grid_to_distribute = creategrid(forest) # Non-conforming
+    grid_to_distribute = Ferrite.creategrid(forest) # Non-conforming
     grid_topology = CoverTopology(grid_to_distribute)
     nparts = MPI.Comm_size(grid_comm)
     partitioning = create_partitioning(grid_to_distribute, grid_topology, nparts, alg)

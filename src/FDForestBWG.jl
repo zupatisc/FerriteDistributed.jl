@@ -16,14 +16,20 @@ end
 function generate_forest_grid(comm::MPI.Comm, refinement::Int64, args...; partitioning_alg = PartitioningAlgorithm.SFC())
     full_grid = generate_grid(args...)
     forest = ForestBWG(full_grid, refinement)
-    refine_all!(forest, 1)
+    #refine_all!(forest, 1)
+    return FDForestBWG(forest, comm, partitioning_alg)
+end
+
+function generate_forest_grid(comm::MPI.Comm, refinement::Int64, base_grid::Grid; partitioning_alg = PartitioningAlgorithm.SFC())
+    forest = ForestBWG(base_grid, refinement)
+    #refine_all!(forest, 1)
     return FDForestBWG(forest, comm, partitioning_alg)
 end
 
 """
 Return a NODGrid with the local grid
 """
-function materialize_forest(dforest::FDForestBWG)
+function creategrid(dforest::FDForestBWG)
     return NODGrid(dforest)
 end
 
